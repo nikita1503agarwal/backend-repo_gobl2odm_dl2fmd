@@ -1,6 +1,11 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Optional
+
+from schemas import Lead
+from database import create_document, get_documents, db
 
 app = FastAPI()
 
@@ -20,6 +25,41 @@ def read_root():
 def hello():
     return {"message": "Hello from the backend API!"}
 
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+@app.post("/api/leads")
+def create_lead(lead: Lead):
+    """Create a new consulting inquiry lead and store it in MongoDB."""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        lead_id = create_document("lead", lead)
+        return {"id": lead_id, "status": "created"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/leads")
+def list_leads(limit: int = 10):
+    """List recent leads (for verification). In production, protect this endpoint."""
+    try:
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not available")
+        docs = get_documents("lead", {}, limit)
+        # Convert ObjectId to string safely
+        cleaned = []
+        for d in docs:
+            d["_id"] = str(d.get("_id"))
+            cleaned.append(d)
+        return {"items": cleaned}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/test")
 def test_database():
     """Test endpoint to check if database is available and accessible"""
@@ -34,17 +74,17 @@ def test_database():
     
     try:
         # Try to import database module
-        from database import db
+        from database import db as _db
         
-        if db is not None:
+        if _db is not None:
             response["database"] = "✅ Available"
             response["database_url"] = "✅ Configured"
-            response["database_name"] = db.name if hasattr(db, 'name') else "✅ Connected"
+            response["database_name"] = _db.name if hasattr(_db, 'name') else "✅ Connected"
             response["connection_status"] = "Connected"
             
             # Try to list collections to verify connectivity
             try:
-                collections = db.list_collection_names()
+                collections = _db.list_collection_names()
                 response["collections"] = collections[:10]  # Show first 10 collections
                 response["database"] = "✅ Connected & Working"
             except Exception as e:
